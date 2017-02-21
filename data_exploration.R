@@ -47,7 +47,7 @@ CCM <- matrix(0, nrow = length(V(hiTech)),
 for(i in 1:length(hiTechCliques)) {
   CCM[hiTechCliques[[i]], i] <- 1
 }
-
+CCMOutput <- data.frame(V(hiTech)$label, rowSums(CCM))
 # Plot Chris' ego network
 chrisEgo <- ego(hiTech, 1, nodes = 29)[[1]]
 chrisNet <- subgraph(hiTech, chrisEgo)
