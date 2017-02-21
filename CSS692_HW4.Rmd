@@ -1,0 +1,178 @@
+---
+title: "CSS 692 Homework - Brokers and Bridges"
+author: "Greg Tozzi"
+date: "2/21/2017"
+output:
+  word_document:
+    fig_caption: yes
+  html_document:
+    fig_caption: yes
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pander)
+suppressMessages(source('helper_functions.R'))
+```
+
+## Introduction
+Investigators considered the case of an IT firm undergoing a campaign for unionization.  A friendship network of the firm derived from survey data is presented below.  In this graph, nodes with no preference for unionization are shown in black.  Those in management, all of whom are against unionization, are shown in red.  Those employees who are against unionization are shown in orange.  Employees actively advocating unionization are shown in light blue.  The two employees who support unionization but who are not actively promoting it are shown in a darker shade of blue.  This color scheme will be used in subsequent graphs as well.
+
+```{r fig1,fig.width=8,fig.height=8,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 1 - Directed friendship network showing position on unionization"}
+# Load and plot the graph
+suppressMessages(hiTech <- import_pajek('Hi-tech.net'))
+
+# Add union classes
+unionClass <- read.csv('Hi-techUnionClass.csv')$union
+V(hiTech)$unionClass <- unionClass
+
+# Assign vertex colors by class
+classColors <- unionColors[V(hiTech)$unionClass + 1]
+
+# Recolor Chris and Ovid
+reColor <- which(V(hiTech)$label %in% c('Chris', 'Ovid'))
+classColors[reColor] <- '#01ABCE'
+V(hiTech)$classColor <- classColors
+
+plot(hiTech,
+     edge.arrow.size = 0.3,
+     vertex.label.family = "Futura Bold",
+     vertex.label.color = 'white',
+     vertex.frame.color = 'white',
+     vertex.color = V(hiTech)$classColor,
+     vertex.label.cex = 0.5)
+```
+
+Notably, not all perceived friendships are reciprocated.  Computations on the graph, including those involved in computing cliques, require reciprocated relationships.  An undirected graph showing only mutual relationships is presented below.
+
+```{r fig2,fig.width=8,fig.height=8,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 2 - Undirected reciprocated friendship network showing position on unionization"}
+
+hiTech <- as.undirected(hiTech, mode = 'mutual')
+plot(hiTech,
+     edge.arrow.size = 0.2,
+     vertex.label.family = "Futura Bold",
+     vertex.label.color = 'white',
+     vertex.frame.color = 'white',
+     vertex.color = V(hiTech)$classColor,
+     vertex.label.cex = 0.7)
+```
+
+### Investigating cliques
+Cliques can be computed from the graph above.  There are `r` maximal cliques with a size greater than three nodes.  These cliques can then be converted into a co-clique matrix.  Summing across rows of that matrix gives the number of unique maximal cliques that a node belongs to.  The top five nodes by clique membership are:
+
+```{r, echo=FALSE}
+# Identify cliques
+hiTechCliques <- max_cliques(hiTech, min = 3)
+suppressWarnings(cliqueAnalysis <- sapply(hiTechCliques, function(x) ego_analysis(hiTech, x)) %>% t)
+cliqueAnalysisCollapse <- data.frame(cliqueAnalysis[,2], (cliqueAnalysis[,3] + cliqueAnalysis[,4]))
+names(cliqueAnalysisCollapse) <- c('pro', 'anti')
+mixedCliques <- which(cliqueAnalysisCollapse[,1] != 0 & cliqueAnalysisCollapse[,2] != 0)
+
+# Compute the co-clique matrix
+CCM <- matrix(0, nrow = length(V(hiTech)),
+              ncol = length(hiTechCliques))
+for(i in 1:length(hiTechCliques)) {
+  CCM[hiTechCliques[[i]], i] <- 1
+}
+
+# Compute row sums
+CCMOutput <- data.frame(V(hiTech)$label, rowSums(CCM))
+names(CCMOutput) <- c('Node', 'Cliques')
+
+# Order the nodes
+cliqueOrder <- sort(CCMOutput$Cliques, decreasing = T, index.return = T)$ix
+head(CCMOutput[cliqueOrder,]) %>% pander
+```
+
+We note here that Chris is a member of many more cliques than the clear majority of his peers.  Is the nature of the cliques to which Chris belongs relevant to the analysis? To explore this, we determine which cliques are heterogeneous in opinion.  A clique with this characteristic will contain members that both support and oppose unionization.  Members that are undecided are not considered.  There are `r length(mixedCliques)` cliques that are heterogeneous in opinion.  These are plotted below.
+
+```{r fig3,fig.width=4,fig.height=4,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 3 - Cliques that are heterogeneous in opinion"}
+
+# Plot mixed cliques
+sapply(mixedCliques, function(x) clique_plot(hiTech, hiTechCliques[[x]]))
+```
+
+Chris is the only supporter of unionization that belongs to cliques that are heterogeneous in opinion.  If we accept that membership in a clique implies acceptance of its norms, we can see that Chris may have been under substantial pressure not to support unionization overtly.  This places Chris in a significantly different position than Ovid, the other member of the firm that supported unionization privately but did not do so publicly.  And what of Ovid?  Ovid is a member of two cliques.  These are plotted below.
+
+```{r fig4,fig.width=4,fig.height=4,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 4 - Ovid's cliques"}
+
+Ovid <- which(V(hiTech)$label == 'Ovid')
+OvidCliques <- which(sapply(hiTechCliques, function(x) Ovid %in% x))
+
+# Plot Ovid's cliques
+sapply(OvidCliques, function(x) clique_plot(hiTech, hiTechCliques[[x]]))
+```
+
+The only two cliques to which Ovid belongs include Chris.  One wonders, was Ovid’s silent support of unionization a result of his own beliefs, or was Chris, influenced as he was by membership in several cliques that are heterogeneous in opinion, pressured to compel Ovid to keep his support of unionization quiet?
+
+### Considering ego networks
+Is Chris’ ego network substantially different from those of his peers?  To open this analysis, we consider Chris’ ego network, plotted below.
+
+```{r fig5,fig.width=8,fig.height=8,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 5 - Chris' ego network"}
+
+# Plot Chris' ego network
+chrisEgo <- ego(hiTech, 1, nodes = 29)[[1]]
+suppressWarnings(chrisNet <- subgraph(hiTech, chrisEgo))
+
+plot(chrisNet,
+     edge.arrow.size = 0.2,
+     vertex.label.family = "Futura Bold",
+     vertex.label.color = 'white',
+     vertex.frame.color = 'white',
+     vertex.color = V(chrisNet)$classColor,
+     vertex.label.cex = 0.7,
+     layout = layout_with_fr)
+```
+
+Chris’ ego network includes the three non-management employees opposed to unionization, two employees favoring unionization, and seven undecided nodes.  This seems like a particularly diverse grouping, but is it?  To explore this, we compute ego networks for all the nodes and report the diversity of opinions on the unionization issue for each.  We then determine how many of the nodes belong to opinionated heterogeneous ego networks, that is, ego networks that include nodes that both favor and are opposed to unionization.
+
+```{r fig6,fig.width=8,fig.height=8,echo=FALSE,message=FALSE,include=TRUE,fig.cap="Fig. 6 - Ego networks that are heterogeneous in opinion"}
+
+# Analyze ego nets
+Ego <- ego(hiTech, 1)
+egoAnalysis <- sapply(Ego, function(x) ego_analysis(hiTech, x)) %>% t
+egoAnalysisCollapse <- data.frame(egoAnalysis[,2], (egoAnalysis[,3] + egoAnalysis[,4]))
+names(egoAnalysisCollapse) <- c('pro', 'anti')
+mixedNets <- which(egoAnalysisCollapse[,1] != 0 & egoAnalysisCollapse[,2] != 0)
+
+# Plot the heterogeneous nets
+sapply(mixedNets, function(x) plot_ego_net(hiTech, Ego, x))
+```
+
+There are `r length(mixedNets)` ego networks that are heterogeneous in opinion.  Remarkably, Chris appears in every one of the heterogeneous ego networks.  Chris is the only node supporting unionization, in fact, that appears in the heterogeneous ego networks centered on those who oppose unionization.
+
+### Constraint
+Chris clearly appears to be in a unique position relative to his peers.  Will computing constraint support this conclusion?  We recall that low values of constraint imply that a node has non-redundant structural connections.  Low values imply that a node should be in a good position to act as a broker.
+
+```{r}
+hiTechConst <- constraint(hiTech)
+constSort <- sort(hiTechConst)
+sortInd <- sapply(constSort, function(x) which(hiTechConst == x))[1:6] %>% unlist
+constDF <- data.frame(V(hiTech)$label[sortInd], hiTechConst[sortInd])
+names(constDF) <- c('Node', 'Constraint')
+constDF %>% pander
+```
+
+The analysis suggests that Chris is best positioned to act as a broker.  Neither Irv, Tom, nor Rick entered the discussion with a position on unionization.  Dale and Mel, however, were against unionization.  What can we infer from this result?  First, the analysis would suggest that Chris was in an enviable position in that he could bring together members who were not otherwise connected to strike deals.  On the face of it, it seems that this was not the case.  After all, Chris left the firm rather than voting on the issue only to return some days later.  Perhaps, as suggested, above, there’s an alternative narrative.
+
+#### An alternative narrative
+There is nothing to say that Chris did not, in fact, strike a rather Machiavellian deal to resolve his friendship bonds with unionization detractors with his own belief that unionization was in the firm’s interest.  Perhaps as suggested above, Chris agreed to pressure Ovid into not publically advocating for unionization.  It is not unreasonable to suggest that Chris agreed to leave the firm in order not to vote on the matter with the understanding that management would take him back after the vote occurred.  It is entirely possible that Chris received some other form of compensation in exchange for taking these rather extreme actions.
+
+### What about betweenness?
+Betweenness gives a sense of a of the likelihood that a node will be used to pass a message between two other nodes in the graph.  In a sense, betweenness is a weak form of bridging.  Actual cutpoints and nodes lying on bridges in a graph will be rewarded with increased betweenness because they lie, by definition, on the shortest path between sets of nodes.  Nodes that occupy central positions in a graph but are not cutpoints or members of bridges may also be rewarded, however, if they are on geodesics between other nodes in the graph regardless of the ability of information to be passed around the node under consideration.  The top five nodes in the graph by betweeness are:
+
+```{r, echo = FALSE}
+betweennessTech <- betweenness(hiTech, normalize = T)
+betweenDF <- data.frame(V(hiTech)$label, betweennessTech)
+names(betweenDF) <- c('Node', 'Betweenness')
+betweenSort <- sort(betweennessTech, decreasing = TRUE,
+                    index.return = T)$ix
+panderOptions("digits", 3)
+betweenDF[betweenSort,] %>% head %>% pander
+```
+
+Notably, Chris is near the top of the nodes by betweenness.  All the other nodes at the top of the betweeness ranking are agnostic on the matter of unionization with the exception of Dale.
+
+### Conclusions
+Chris clearly occupied a unique position among the employees at the IT firm.  What is unclear is whether Chris’ position and subsequent resignation from the firm was indicative of pressure being placed on Chris or if Chris used his position to sell out his personal view of unionization in favor of preferred treatment by management.  When Chris is excluded from the analysis, the anti-unionization employees are near the top – although not quite at the top – of the key objective measures of brokerage.  It is possible that these actors used their positions in an expected manner to advance their view that the firm should not be unionized.
+
